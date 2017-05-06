@@ -2,7 +2,9 @@
 title:  "Practical Machine Learning - Course Project"
 author: "Elliot Napakh"
 date:   "May 6, 2017"
-output: html_document
+output:
+  md_document:
+    variant: markdown_github
 ---
   
 ```{r setup, include=FALSE, echo=FALSE}
