@@ -1,0 +1,147 @@
+---
+title:  "Practical Machine Learning - Course Project"
+author: "Elliot Napakh"
+date:   "May 6, 2017"
+output: html_document
+---
+  
+```{r setup, include=FALSE, echo=FALSE}
+library(caret)
+library(splines)
+library(parallel)
+library(gbm)
+library(plyr)
+library(rattle)
+library(rpart.plot)
+```
+
+## Overivew
+For our project we will use data recorded using personal performance devices, such as Jawbone Up, Nike FuelBand, and Fitbit.
+Our is to build a model in order to predict the manner in which testers did the exercise.  We will evaluate training data set, identify predictors, train and evaluate the model performance and accuracy.
+
+
+## Prepare Data
+We will partition initial 'training' set into 'training' and 'validation/testing' set for initial model configuration.  We will use provided 'testing' set for final testing.
+```{r}
+set.seed(20482)
+testing<-read.csv("pml-testing.csv", na.strings = c("NA", ""))
+training<-read.csv("pml-training.csv", na.strings = c("NA", ""))
+dim(training)
+```
+
+###Step 1
+Remove desciptive columns & timestamps
+```{r}
+
+pml<-training
+exclude_cols<-which(colnames(training) %in% c("X","user_name","raw_timestamp_part_1","raw_timestamp_part_2","cvtd_timestamp","new_window"))
+pml<-pml[, -exclude_cols]
+```
+
+###Step 2
+We want to identify and remove variants with zero variance
+```{r}
+nzv<-nearZeroVar(pml)
+pml<-pml[, -nzv]
+```
+
+###Step 3
+Remove columns with NA columns > 0.9% and blank strings
+```{r}
+na_cols<-{}
+for (c in 1:length(pml)){
+  pctNA <- sum(is.na(pml[,c]))/nrow(pml)
+  if (pctNA > 0.9) na_cols<-append(na_cols, c)
+  if ( any(pml[, c] == "", na.rm=TRUE) ) na_cols<-append(na_cols,c)
+}
+pml<-pml[,-na_cols]
+dim(pml)
+```
+We effectively reduced number of predictors from 160 to 54
+
+
+##Partition data
+Partition data into actual training & testing sets
+```{r}
+inTrain <- createDataPartition(y=pml$classe,p=0.7, list=FALSE)
+myTrain <- pml[inTrain,]
+myTest <- pml[-inTrain,]
+
+```
+
+##Cross-Validation in train control
+We will use 'cv' parameter for cross validation in trainControl variable in our
+training models.  We are using lower than default number=3 of subsamples to reduce performance impact
+```{r}
+trainControl <- trainControl(method="cv", number=3, verboseIter=F)
+```
+
+##Model Selection
+
+###Training
+To start, We want to evaluate accuracy of 3 models: CART (rpart), Boosting (gbm), and Random Forests (rf)
+and assess their accuracy.  As a reference, we will also time training for each model: performance may be a consideration when selecting a model.
+```{r, echo=FALSE}
+tm_rpart<-system.time(modelFit_rpart <-train(classe ~., data=myTrain, method="rpart", trControl=trainControl))
+tm_gbm<-system.time(modelFit_gbm <-train(classe ~., data=myTrain, method="gbm", trControl=trainControl, verbose=F))
+tm_rf<-system.time(modelFit_rf <- train(classe ~ ., data=myTrain, method="rf", trControl=trainControl, ntree=50))
+```
+
+###Prediction
+We will create prediction using test data.
+```{r}
+pred_rpart <-predict(modelFit_rpart, newdata = myTest)
+pred_gbm<-predict(modelFit_gbm, newdata=myTest)
+pred_rf<-predict(modelFit_rf,newdata=myTest)
+```
+
+###Accuracy Test
+We will use 'confusionMatrix' function to evaluate our model accuracy.
+```{r}
+cm_rpart<-confusionMatrix(pred_rpart, myTest$classe)
+cm_gbm<-confusionMatrix(pred_gbm, myTest$classe)
+cm_rf<-confusionMatrix(pred_rf, myTest$classe)
+```
+
+##Results and Assesment
+```{r}
+comp_results<-data.frame(model=c("CART", "GBM", "RF"), 
+                         accuracy=c(cm_rpart$overall[1], cm_gbm$overall[1], cm_rf$overall[1]),
+                         elapsed=c(tm_rpart[3], tm_gbm[3], tm_rf[3])
+)
+comp_results<-mutate(comp_results, oos.err=1-accuracy)
+comp_results
+```
+
+##Conclusion
+We observe that both rf and gbm models exhibit high degree of accuracy and low out-of-sample error. RF model accuracy is slightly better, and performance is significantly better. There is always a chance that our model is overfitting the training data, and we may consider model ensemble in order to reduce effect of overfitting.
+
+##Appendix A
+Additional model information and plots
+
+### Rpart Model
+```{r}
+print(modelFit_rpart$finalModel)
+rattle::fancyRpartPlot(modelFit_rpart$finalModel, main="RPart Model")
+```
+
+### Boosting with Trees Model (GBM)
+```{r}
+print(modelFit_gbm)
+plot(modelFit_gbm, main="Boosting with Trees")
+
+```
+
+
+### Random Forest Model
+```{r}
+print(modelFit_rf$finalModel)
+plot(modelFit_rf$finalModel, main="Random Forest")
+```
+
+##Appendix B
+We will now get apply our model on the test data.
+```{r}
+pred_final_test<-predict(modelFit_rf, newdata = testing)
+pred_final_test
+```
